@@ -1,0 +1,2 @@
+# gocode
+go get golang
