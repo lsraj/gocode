@@ -13,8 +13,13 @@ type sytemLogin struct {
 }
 
 func processClients(cfd net.Conn) {
+	dec := json.NewDecoder(cfd)
+	var Cmd string
+	dec.Decode(&Cmd)
+	fmt.Println(" cmd: ", Cmd)
+
 	var login sytemLogin
-	json.NewDecoder(cfd).Decode(&login)
+	dec.Decode(&login)
 	fmt.Println("loginID: ", login.LoginId, ", passwd: ", login.Passwd)
 
 	_, err := cfd.Write([]byte("AUTH SUCCESS"))
