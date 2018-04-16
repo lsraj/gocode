@@ -12,16 +12,19 @@ type sytemLogin struct {
 }
 
 type pxmServer struct {
-	listener net.Listener
+	listener      net.Listener
+	clientReqChan chan net.Conn
+	serverDone    chan bool
 }
 
 func initServer() (*pxmServer, error) {
 	listener, err := net.Listen("unix", "/tmp/unix.socket")
-	fmt.Println("initServer(): listener: ", listener)
 	if err != nil {
 		return nil, err
 	}
-	pxms := &pxmServer{listener}
+	reqChan := make(chan net.Conn)
+	done := make(chan bool)
+	pxms := &pxmServer{listener, reqChan, done}
 	return pxms, nil
 }
 
@@ -33,25 +36,31 @@ func (pxms *pxmServer) Start() {
 			fmt.Println("Accept failed : ", err)
 			continue
 		}
-		go processClients(conn)
+		pxms.clientReqChan <- conn
 	}
+	close(pxms.clientReqChan)
 
 }
 
-func processClients(clientConn net.Conn) {
-	dec := json.NewDecoder(clientConn)
-	var Cmd string
-	dec.Decode(&Cmd)
-	fmt.Println(" cmd: ", Cmd)
+func (pxms *pxmServer) processClients() {
+	for conn := range pxms.clientReqChan {
+		dec := json.NewDecoder(conn)
+		var Cmd string
+		dec.Decode(&Cmd)
+		fmt.Println(" cmd: ", Cmd)
 
-	var login sytemLogin
-	dec.Decode(&login)
-	fmt.Println("loginID: ", login.LoginId, ", passwd: ", login.Passwd)
+		var login sytemLogin
+		dec.Decode(&login)
+		fmt.Println("loginID: ", login.LoginId, ", passwd: ", login.Passwd)
 
-	_, err := clientConn.Write([]byte("AUTH SUCCESS"))
-	if err != nil {
-		return
+		_, err := conn.Write([]byte("AUTH SUCCESS"))
+		if err != nil {
+			return
+		}
+		conn.Close()
 	}
+	pxms.serverDone <- true
+
 }
 
 func main() {
@@ -60,5 +69,7 @@ func main() {
 		fmt.Println("initServer() failed - ", err)
 		return
 	}
-	srv.Start()
+	go srv.Start()
+	go srv.processClients()
+	<-srv.serverDone
 }
