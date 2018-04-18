@@ -1,66 +1,125 @@
 package main
 
-import (
-	"encoding/json"
-	"fmt"
-	"net"
-)
+import "encoding/json"
+import "fmt"
+import "net"
+import "os"
+import "os/signal"
+import "syscall"
+import "time"
 
-type sytemLogin struct {
-	LoginId string
-	Passwd  string
+var srvShutdown chan bool
+
+type netServer struct {
+	listener     *net.UnixListener // unix local sock
+	taskChan     chan net.Conn     // unbuf channel for client connections
+	sigChan      chan os.Signal    // buffered channel
+	srvDone      chan bool
+	numOfWorkers int
 }
 
-type pxmServer struct {
-	listener      net.Listener
-	clientReqChan chan net.Conn
-	serverDone    chan bool
+// initialize signals.
+func initSignals() {
+	// block all async signals to this server
+	signal.Ignore()
 }
 
-func initServer() (*pxmServer, error) {
-	listener, err := net.Listen("unix", "/tmp/unix.socket")
+// initializes server:
+//   1) creates listener.
+//   2) creates task channel - client connections accepted on this channel.
+//   3) initializes few other things such as signal channel, num of workers etc.
+func initServer() (*netServer, error) {
+	sockAddr, err := net.ResolveUnixAddr("unix", "/tmp/unix.socket")
 	if err != nil {
+		fmt.Println("initServer() failed on ResolveUnixAddr(): ", err)
 		return nil, err
 	}
-	reqChan := make(chan net.Conn)
-	done := make(chan bool)
-	pxms := &pxmServer{listener, reqChan, done}
-	return pxms, nil
+	srvlistener, err := net.ListenUnix("unix", sockAddr)
+	if err != nil {
+		fmt.Println("initServer() failed on ListenUnix(): ", err)
+		return nil, err
+	}
+	netSrv := &netServer{
+		listener:     srvlistener,
+		taskChan:     make(chan net.Conn),
+		sigChan:      make(chan os.Signal, 1),
+		srvDone:      make(chan bool),
+		numOfWorkers: 3,
+	}
+	srvShutdown = make(chan bool)
+	initSignals()
+	return netSrv, nil
 }
 
-func (pxms *pxmServer) Start() {
+// Accept client connections. Each connection is directed onto
+// a channel. Worker threads pickup and work on these connections.
+func (netSrv *netServer) acceptClientReqs() {
 	fmt.Println("Listening on /tmp/unix.socket")
 	for {
-		conn, err := pxms.listener.Accept()
-		if err != nil {
-			fmt.Println("Accept failed : ", err)
-			continue
+		select {
+		case <-srvShutdown:
+			netSrv.srvDone <- true
+			fmt.Println("Exiting server")
+			return
+		default:
+			netSrv.listener.SetDeadline(time.Now().Add(time.Second))
+			conn, err := netSrv.listener.Accept()
+			if err != nil {
+				fmt.Println("Accept failed : ", err)
+				continue
+			}
+			netSrv.taskChan <- conn
 		}
-		pxms.clientReqChan <- conn
 	}
-	close(pxms.clientReqChan)
-
 }
 
-func (pxms *pxmServer) processClients() {
-	for conn := range pxms.clientReqChan {
-		dec := json.NewDecoder(conn)
-		var Cmd string
-		dec.Decode(&Cmd)
-		fmt.Println(" cmd: ", Cmd)
+func processRequest(conn net.Conn) {
+	dec := json.NewDecoder(conn)
+	var Cmd string
+	dec.Decode(&Cmd)
+	fmt.Println(" cmd: ", Cmd)
 
-		var login sytemLogin
-		dec.Decode(&login)
-		fmt.Println("loginID: ", login.LoginId, ", passwd: ", login.Passwd)
-
-		_, err := conn.Write([]byte("AUTH SUCCESS"))
-		if err != nil {
-			return
-		}
-		conn.Close()
+	// reply to client
+	_, err := conn.Write([]byte("AUTH SUCCESS"))
+	if err != nil {
+		return
 	}
-	pxms.serverDone <- true
+	conn.Close()
+}
 
+// Pickup a client connection, work on it and close connection.
+func (netSrv *netServer) taskWorker(workerId int) {
+	fmt.Println("taskWorker(): starting worker-", workerId)
+	// for conn := range netSrv.taskChan {
+	for {
+		select {
+		case <-srvShutdown:
+			fmt.Println("taskWorker(): taskWorker-", workerId, " shutting down")
+			return
+		case conn := <-netSrv.taskChan:
+			if conn == nil {
+				fmt.Println("taskWorker(): worker-", workerId, " continue")
+				continue
+			}
+			processRequest(conn)
+			fmt.Println("taskWorker(): worker-", workerId, " processed client connection: ", conn)
+		}
+	}
+}
+
+// Handle SIGINT and SIGHUP for now.
+func (netSrv *netServer) signalHandler() {
+	signal.Notify(netSrv.sigChan, syscall.SIGINT, syscall.SIGHUP)
+	sig := <-netSrv.sigChan
+	fmt.Println("signalHandler() received signal", sig)
+	srvShutdown <- true
+	close(srvShutdown)
+}
+
+func (netSrv *netServer) cleanUp() {
+	close(netSrv.taskChan)
+	netSrv.listener.Close()
+	close(netSrv.srvDone)
 }
 
 func main() {
@@ -69,7 +128,14 @@ func main() {
 		fmt.Println("initServer() failed - ", err)
 		return
 	}
-	go srv.Start()
-	go srv.processClients()
-	<-srv.serverDone
+	go srv.signalHandler()
+
+	for i := 1; i <= srv.numOfWorkers; i++ {
+		go srv.taskWorker(i)
+	}
+	go srv.acceptClientReqs()
+
+	// wait server to complete
+	<-srv.srvDone
+	srv.cleanUp()
 }

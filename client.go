@@ -10,11 +10,6 @@ import (
 
 var wg sync.WaitGroup
 
-type sytemLogin struct {
-	LoginId string
-	Passwd  string
-}
-
 func sendReq1() error {
 	fd, err := net.Dial("unix", "/tmp/unix.socket")
 	if err != nil {
@@ -24,13 +19,6 @@ func sendReq1() error {
 
 	req := "SYSLOGIN1"
 	err = json.NewEncoder(fd).Encode(req)
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-
-	loginInfo := sytemLogin{"admin@localhost1", "admin1"}
-	err = json.NewEncoder(fd).Encode(loginInfo)
 	if err != nil {
 		log.Fatal(err)
 		return err
@@ -57,13 +45,6 @@ func sendReq2() error {
 		return err
 	}
 
-	loginInfo := sytemLogin{"admin@localhost2", "admin2"}
-	err = json.NewEncoder(fd).Encode(loginInfo)
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-
 	resp := make([]byte, 13)
 	_, err = fd.Read(resp)
 	fmt.Println(string(resp))
@@ -80,13 +61,6 @@ func sendReq3() error {
 
 	req := "SYSLOGIN3"
 	err = json.NewEncoder(fd).Encode(req)
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-
-	loginInfo := sytemLogin{"admin@localhost3", "admin3"}
-	err = json.NewEncoder(fd).Encode(loginInfo)
 	if err != nil {
 		log.Fatal(err)
 		return err
