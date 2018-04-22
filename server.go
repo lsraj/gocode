@@ -18,6 +18,14 @@ type netServer struct {
 	numOfWorkers int
 }
 
+type cmd struct {
+	Cmd string
+}
+type sytemLogin struct {
+	LoginId string
+	Passwd  string
+}
+
 // initialize signals.
 func initSignals() {
 	// block all async signals to this server
@@ -75,9 +83,21 @@ func (netSrv *netServer) acceptClientReqs() {
 
 func processRequest(conn net.Conn) {
 	dec := json.NewDecoder(conn)
-	var Cmd string
+	var Cmd cmd
 	dec.Decode(&Cmd)
-	fmt.Println(" cmd: ", Cmd)
+	fmt.Println(" cmd: ", Cmd.Cmd)
+	switch Cmd.Cmd {
+	case "SYSLOGIN":
+		var login sytemLogin
+		dec.Decode(&login)
+		fmt.Println("Login: ", login.LoginId, "Passwd: ", login.Passwd)
+		// Call Authenticate func
+	case "RESETPASSWD":
+		var login sytemLogin
+		dec.Decode(&login)
+		fmt.Println("Login: ", login.LoginId, "Passwd: ", login.Passwd)
+		// Call resetPasswd func
+	}
 
 	// reply to client
 	_, err := conn.Write([]byte("AUTH SUCCESS"))

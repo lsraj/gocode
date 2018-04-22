@@ -8,17 +8,31 @@ import (
 	"sync"
 )
 
+type cmd struct {
+	Cmd string
+}
+type sytemLogin struct {
+	LoginId string
+	Passwd  string
+}
+
 var wg sync.WaitGroup
 
-func sendReq1() error {
+func resetPasswd() error {
 	fd, err := net.Dial("unix", "/tmp/unix.socket")
 	if err != nil {
 		return err
 	}
 	defer fd.Close()
 
-	req := "SYSLOGIN1"
+	req := cmd{Cmd: "RESETPASSWD"}
 	err = json.NewEncoder(fd).Encode(req)
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	params := sytemLogin{LoginId: "admin@localhost", Passwd: "newadmin"}
+	err = json.NewEncoder(fd).Encode(params)
 	if err != nil {
 		log.Fatal(err)
 		return err
@@ -31,36 +45,21 @@ func sendReq1() error {
 	return nil
 }
 
-func sendReq2() error {
+func sysLogin() error {
 	fd, err := net.Dial("unix", "/tmp/unix.socket")
 	if err != nil {
 		return err
 	}
 	defer fd.Close()
 
-	req := "SYSLOGIN2"
+	req := cmd{Cmd: "SYSLOGIN"}
 	err = json.NewEncoder(fd).Encode(req)
 	if err != nil {
 		log.Fatal(err)
 		return err
 	}
-
-	resp := make([]byte, 13)
-	_, err = fd.Read(resp)
-	fmt.Println(string(resp))
-	wg.Done()
-	return nil
-}
-
-func sendReq3() error {
-	fd, err := net.Dial("unix", "/tmp/unix.socket")
-	if err != nil {
-		return err
-	}
-	defer fd.Close()
-
-	req := "SYSLOGIN3"
-	err = json.NewEncoder(fd).Encode(req)
+	params := sytemLogin{LoginId: "admin@localhost", Passwd: "admin"}
+	err = json.NewEncoder(fd).Encode(params)
 	if err != nil {
 		log.Fatal(err)
 		return err
@@ -74,9 +73,8 @@ func sendReq3() error {
 }
 
 func main() {
-	wg.Add(3)
-	go sendReq1()
-	go sendReq2()
-	go sendReq3()
+	wg.Add(2)
+	go sysLogin()
+	go resetPasswd()
 	wg.Wait()
 }
